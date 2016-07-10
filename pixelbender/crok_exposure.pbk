@@ -1,0 +1,172 @@
+<languageVersion : 1.0;>
+
+kernel crok_exposure
+<   namespace : "pyre";
+    vendor : "pyre";
+    version : 1;
+>
+{
+
+    input image4 source;
+    output pixel4 dst;
+    parameter float expo_o< displayName: "Exposure"; defaultValue: 0.0; minValue: -2.0; maxValue: 2.0;>;
+    parameter float expo_r< displayName: "Exposure Red"; defaultValue: 0.0; minValue: -2.0; maxValue: 2.0;>;
+    parameter float expo_g< displayName: "Exposure Green"; defaultValue: 0.0; minValue: -2.0; maxValue: 2.0;>;
+    parameter float expo_b< displayName: "Exposure Blue"; defaultValue: 0.0; minValue: -2.0; maxValue: 2.0;>;
+
+    parameter float contrast_all< displayName: "Contrast"; defaultValue: 1.0; minValue: 0.0; maxValue:10.0;>;
+
+    parameter float contrast_r< displayName: "Contrast Red"; defaultValue: 1.0; minValue: 0.0; maxValue: 10.0;>;
+    parameter float contrast_g< displayName: "Contrast Green"; defaultValue: 1.0; minValue: 0.0; maxValue: 10.0;>;
+    parameter float contrast_b< displayName: "Contrast Blue"; defaultValue: 1.0; minValue: 0.0; maxValue: 10.0;>;
+    parameter float pivot_all< displayName: "Pivot"; defaultValue: 1.0; minValue: 0.0; maxValue: 10.0;>;
+
+    parameter float pivot_r< displayName: "Pivot Red"; defaultValue: 0.18; minValue: 0.0; maxValue: 10.0;>;
+    parameter float pivot_g< displayName: "Pivot Green"; defaultValue: 0.18; minValue: 0.0; maxValue: 10.0;>;
+    parameter float pivot_b< displayName: "Pivot Blue"; defaultValue: 0.18; minValue: 0.0; maxValue: 10.0;>;
+
+
+    parameter int encoding< displayName: "Encoding"; >;
+	
+    const float sqrtoftwo = 1.41421356237;
+
+    const float ga = 17.5;
+    const float br = 1.74;
+
+    // contrast by  Miles
+    float3 adjust_contrast(float3 col, float4 con, float4 piv)
+    {
+        float3 c = con.rgb * float3(con.a);
+        float3 pi = piv.rgb * float3(piv.a);
+        //float3 p = (float3(1.0) - c) / float3(2.0);
+        
+        col = (1.0 - c.rgb) * pi + c.rgb * col;
+
+        return col;
+    }
+
+    // rec709 conversion routine by Miles
+    float3 from_rec709(float3 col)
+    {
+        if (col.r < .081) {
+            col.r /= 4.5;
+        } else {
+            col.r = pow((col.r +.099)/ 1.099, 1.0 / .45);
+        }
+        if (col.g < .081) {
+            col.g /= 4.5;
+        } else {
+            col.g = pow((col.g +.099)/ 1.099, 1.0 / .45);
+        }
+        if (col.b < .081) {
+            col.b /= 4.5;
+        } else {
+            col.b = pow((col.b +.099)/ 1.099, 1.0 / .45);
+        }
+        return col;
+    }
+
+    float3 to_rec709(float3 col)
+    {
+        if (col.r < .018) {
+            col.r *= 4.5;
+        } else if (col.r >= 0.0) {
+            col.r = (1.099 * pow(col.r, .45)) - .099;
+        }
+        if (col.g < .018) {
+            col.g *= 4.5;
+        } else if (col.g >= 0.0) {
+            col.g = (1.099 * pow(col.g, .45)) - .099;
+        }
+        if (col.b < .018) {
+            col.b *= 4.5;
+        } else if (col.b >= 0.0) {
+            col.b = (1.099 * pow(col.b, .45)) - .099;
+        }
+        return col;
+    }
+
+    float3 from_log(float3 col)
+    {
+        if (col.r >= 0.0) {
+            col.r = pow((col.r + br), ga);
+        }
+        if (col.g >= 0.0) {
+            col.g = pow((col.g + br), ga);
+        }
+        if (col.b >= 0.0) {
+            col.b = pow((col.b + br), ga);
+        }
+        return col;
+    }
+
+    float3 to_log(float3 col)
+    {
+        if (col.r >= 0.0) {
+            col.r = (pow(col.r, 1.0 / ga)) - br;
+        }
+        if (col.g >= 0.0) {
+            col.g = (pow(col.g, 1.0 / ga)) - br;
+        }
+        if (col.b >= 0.0) {
+            col.b = (pow(col.b, 1.0 / ga)) - br;
+        }
+        return col;
+    }
+
+    void evaluatePixel (void) 
+    { 
+        float2 uv = outCoord();
+        float3 source = sampleLinear(source, uv).rgb;
+        float3 col = source;
+            
+        // Scene linear exposure
+        if ( encoding == 0)
+            col = col;
+        
+        // video  / Rec 709 exposure
+        else if ( encoding == 1)
+        {
+            col = from_rec709(col);
+        }
+
+        // Logarithmic exposure
+        else if ( encoding == 2)
+        {
+            col = from_log(col);
+        }
+        
+        // contrast stuff by Miles
+        float3 contrast = float3(contrast_r, contrast_g, contrast_b);
+        float3 c_pivot = float3(pivot_r, pivot_g, pivot_b);
+        col = adjust_contrast(col, float4(contrast.r, contrast.g, contrast.b, contrast_all), float4(c_pivot.r, c_pivot.g, c_pivot.b, pivot_all));
+        
+        // overall exposure adjustemnt
+        col = col * pow(2.0, expo_o);
+
+        // single rgb exposure adjustment
+        float r_col = col.r * pow(2.0, expo_r);
+        float g_col = col.g * pow(2.0, expo_g);
+        float b_col = col.b * pow(2.0, expo_b);
+        
+        col = float3(r_col, g_col, b_col);
+        
+        // Scene linear exposure
+        if ( encoding == 0)
+            col = col;
+        
+        // video  / Rec 709 exposure
+        else if ( encoding == 1)
+        {
+            col = to_rec709(col);
+        }
+        
+        // Logarithmic exposure
+        else if ( encoding == 2)
+        {
+            col = to_log(col);
+        }
+        
+        dst = float4(col.r, col.g, col.b, 1.0);
+    }
+}
