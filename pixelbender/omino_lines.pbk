@@ -1,0 +1,204 @@
+<languageVersion : 1.0;>
+
+kernel omino_lines_32
+<   displayname:"omino lines 32";
+    category: "omino";
+    namespace : "omino";
+    vendor : "omino";
+    version : 1;
+    description : "draw line segments";
+>
+{
+    input image4 src;
+    output pixel4 dst;
+    
+    parameter float4 lineColor
+    <
+        aeDisplayName:"line color";
+        defaultValue:float4(1,1,.4,1);
+        aeUIControl:"aeColor";
+    >;
+    parameter float4 fillColor
+    <
+        aeDisplayName:"fill color";
+        defaultValue:float4(0,.2,1,1);
+        aeUIControl:"aeColor";
+    >;
+    parameter float width
+    <
+        minValue:0.0;
+        maxValue:100.0;
+        defaultValue:2.0;
+    >;
+    parameter float opacity
+    <
+        minValue:0.0;
+        maxValue:100.0;
+        defaultValue:100.0;
+        aeUIControl:"aePercentSlider";
+    >;
+    parameter int points
+    <
+        minValue:0;
+        maxValue:5;
+        defaultValue:2;
+    >;
+    parameter bool loop
+    <
+        defaultValue:false;
+    >;
+    parameter bool fill
+    <
+        defaultValue:false;
+    >;
+
+    parameter float2 p1
+    <
+        aeUIControl: "aePoint";
+        aePointRelativeDefaultValue: float2(0.1,0.1);
+        defaultValue: float2(10,10);
+        minValue:float2(-1000.0,-1000.0);
+        maxValue:float2(1000.0,1000.0);
+    >;
+    parameter float2 p2
+    <
+        aeUIControl: "aePoint";
+        aePointRelativeDefaultValue: float2(0.1,0.2);
+        defaultValue: float2(10,20);
+        minValue:float2(-1000.0,-1000.0);
+        maxValue:float2(1000.0,1000.0);
+    >;
+    parameter float2 p3
+    <
+        aeUIControl: "aePoint";
+        aePointRelativeDefaultValue: float2(0.2,0.2);
+        defaultValue: float2(20,20);
+        minValue:float2(-1000.0,-1000.0);
+        maxValue:float2(1000.0,1000.0);
+    >;
+    parameter float2 p4
+    <
+        aeUIControl: "aePoint";
+        aePointRelativeDefaultValue: float2(0.2,0.3);
+        defaultValue: float2(30,40);
+        minValue:float2(-1000.0,-1000.0);
+        maxValue:float2(1000.0,1000.0);
+    >;
+    parameter float2 p5
+    <
+        aeUIControl: "aePoint";
+        aePointRelativeDefaultValue: float2(0.5,0.5);
+        defaultValue: float2(100,130);
+        minValue:float2(-1000.0,-1000.0);
+        maxValue:float2(1000.0,1000.0);
+    >;
+    
+    /*
+     * Return "true" of the point, co, is to the right of the line
+     * segment, that is, if you walk left, do you cross the segment?
+     */
+    bool rightOfLine(float2 co,float2 lineStart,float2 lineEnd)
+    {
+        // normalize to lineStart
+        co -= lineStart;
+        lineEnd -= lineStart;
+        bool result;
+        
+        float yPart = co.y / lineEnd.y;
+        if(yPart < 0.0 || yPart > 1.0)
+            result = false; // we're not in the same vertical span with the line segment
+        else
+        {
+            float xSpot = yPart * lineEnd.x;
+            result = xSpot <= co.x;
+        }
+        return result;
+    }
+    
+    float inTheLine(float2 co,float2 lineStart,float2 lineEnd,float lineWidth)
+    {
+
+        // and now, a bit of fun math, as we plot a line between two points.
+        float2 uv = co - lineStart;
+        float2 xy = lineEnd - lineStart;
+        float xy2 = dot(xy,xy);
+        float g = dot(uv,xy) / xy2;
+        // if we are between the two points, then g is between 0 and 1.
+        float dl = abs(dot(uv,float2(-xy.y,xy.x)) / xy2 * length(xy));
+        // dl is now the distance, in pixels, from outCoord to the line
+
+        lineWidth = lineWidth / 2.0;
+        // if we're between the endpoints and close enough, draw.
+        float result = 0.0;
+        if(lineStart != lineEnd)
+            if(g >= 0.0 && g <= 1.0)
+                result = 1.0 - smoothStep(lineWidth - 0.5,lineWidth + 0.5,dl);
+        return result;
+    }
+            
+    float nearThePoint(float2 co,float2 p,float diameter)
+    {
+        float d = distance(co,p);
+        float radius = diameter / 2.0;
+        d = 1.0 - smoothStep(radius - 0.5,radius + 0.5,d);
+        return d;
+    }
+    
+    
+    void evaluatePixel()
+    {
+        float2 co = outCoord();
+        float g = 0.0;
+        float2 last = p1;
+        
+        bool inside = false;
+        
+        if(points >= 1)
+            g = max(g,nearThePoint(co,p1,width));
+        if(points >= 2)
+        {
+            g = max(g,inTheLine(co,p1,p2,width));
+            g = max(g,nearThePoint(co,p2,width));
+            inside = inside ^^ rightOfLine(co,p1,p2);
+        }
+        if(points >= 3)
+        {
+            g = max(g,inTheLine(co,p2,p3,width));
+            g = max(g,nearThePoint(co,p3,width));
+            last = p3;
+            inside = inside ^^ rightOfLine(co,p2,p3);
+        }
+        if(points >= 4)
+        {
+            g = max(g,inTheLine(co,p3,p4,width));
+            g = max(g,nearThePoint(co,p4,width));
+            last = p4;
+            inside = inside ^^ rightOfLine(co,p3,p4);
+        }
+        if(points >= 5)
+        {
+            g = max(g,inTheLine(co,p4,p5,width));
+            g = max(g,nearThePoint(co,p5,width));
+            last = p5;
+            inside = inside ^^ rightOfLine(co,p4,p5);
+        }
+        
+        inside = inside ^^ rightOfLine(co,last,p1);
+
+        if(loop && points >= 3)
+            g = max(g,inTheLine(co,last,p1,width));
+        
+        // start with alphablank, or the fill color
+        float4 drawColor = float4(0,0,0,0);
+        if(fill && points >= 3 && inside)
+            drawColor = fillColor;
+        
+        // draw the line color atop it
+        drawColor = mix(drawColor,lineColor,g);
+        
+        // and the line & fill, atop the image
+        float a = drawColor.a * opacity / 100.0;
+        float4 img = sampleNearest(src,outCoord());
+        dst = mix(img,drawColor,a);
+    }
+}

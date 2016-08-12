@@ -1,0 +1,156 @@
+<languageVersion : 1.0;>
+
+kernel omino_plane_32
+<   namespace : "omino";
+    vendor : "omino";
+    category : "omino";
+    version : 1;
+    description : "a plane receding into the distance";
+>
+{
+    input image4 bg;
+    input image4 cardImage;
+        
+    parameter float2 srcSize
+    <
+        aeUIControl:"aePoint";
+        minValue:float2(1,1); 
+        maxValue:float2(1000,1000); 
+        defaultValue:float2(500,500);
+        aePointRelativeDefaultValue: float2(1,1);
+        aeDisplayName: "source size 1";
+    >;
+
+    
+    parameter float2 p1
+    <
+        aeUIControl:"aePoint";
+        minValue:float2(-1000,-1000); 
+        maxValue:float2(1000,1000); 
+        defaultValue:float2(100,400);
+        aePointRelativeDefaultValue: float2(.2,.8);
+        aeDisplayName: "point 1";
+    >;
+
+    parameter float2 p2
+    <
+        aeUIControl:"aePoint";
+        minValue:float2(-1000,-1000); 
+        maxValue:float2(1000,1000); 
+        defaultValue:float2(400,400);
+        aePointRelativeDefaultValue: float2(.8,.8);
+        aeDisplayName: "point 2";
+    >;
+
+    parameter float2 eye
+    <
+        aeUIControl:"aePoint";
+        minValue:float2(-1000,-1000); 
+        maxValue:float2(1000,1000); 
+        defaultValue:float2(200,200);
+        aePointRelativeDefaultValue: float2(.5,.5);
+        aeDisplayName: "eye xy";
+    >;
+    
+    parameter float eyeZ
+    <
+        minValue:float(0); 
+        maxValue:float(1000); 
+        defaultValue:float(200);
+        aeDisplayName: "eye z";
+    >;
+    
+    parameter float2 slide
+    <
+        minValue:float2(-10,-10); 
+        maxValue:float2(10,10); 
+        defaultValue:float2(0,0);
+        aeDisplayName: "slide";
+    >;
+
+    parameter int orientation
+    <
+        minValue:0;
+        maxValue:2;
+        defaultValue:0;
+        aeUIControl:"aePopup";
+        aePopupString:"upright|invert|alternate";
+    >;
+
+    parameter float xLow <minValue:-30.0 ; maxValue:30.0; defaultValue: 0.0;>;
+    parameter float xHigh <minValue:-30.0 ; maxValue:30.0; defaultValue: 1.0;>;
+    parameter float yLow <minValue:-30.0 ; maxValue:30.0; defaultValue: 0.0;>;
+    parameter float yHigh <minValue:-30.0 ; maxValue:30.0; defaultValue: 5.0;>;
+
+    output pixel4 dst;
+
+    void
+    evaluatePixel()
+    {
+        // discover where on the Plane our ray intersects.
+        // the ray is from eye xyz to somewhere on p1/p2.
+        float2 co = outCoord();
+        
+        // p1 and p2 are the vars given
+        // p3 and p4 are eye and screen, respectively
+        
+        float2 p3 = eye;
+        float2 p4 = co;
+        
+        float2 p43 = p4 - p3;
+        float2 p21 = p2 - p1;
+        float2 p13 = p1 - p3;
+        
+        float denominator = p43.y * p21.x - p43.x * p21.y;
+        
+        // position along the plane's xy line
+        float t = (p43.x * p13.y - p43.y * p13.x) / denominator;
+        // position along the eye ray if negative, it's on the wrong side.
+        float r = (p21.x * p13.y - p21.y * p13.x) / denominator;
+        
+        // where in the Z axis do we actually intersect? here, z+ is into the screen
+        // z negative is out of the screen
+        // z in pixels
+        float z = (r - 1.0) * eyeZ;
+        
+        // now, scale z relative to p1 to p2.
+        float2 srcXy;
+        
+        float srcScale = srcSize.x / distance(p1,p2);
+        
+        srcXy.y = z * srcScale;// * srcSize.y * srcScale;
+        srcXy.x = srcSize.x * t;
+        z /= srcSize.y / srcScale;
+        
+        srcXy += slide * srcSize;
+        
+        if(orientation == 2) // alternate
+        {
+            float2 ss2 = srcSize * 2.0;
+            srcXy = mod(srcXy,ss2);
+            if(srcXy.x > srcSize.x)
+                srcXy.x = ss2.x - srcXy.x;
+            if(srcXy.y > srcSize.y)
+                srcXy.y = ss2.y - srcXy.y;
+            srcXy = max(srcXy,float2(1,1));
+        }
+        else
+        {
+            srcXy = mod(srcXy,srcSize);
+            if(orientation == 0) // upright
+            srcXy.y = srcSize.y - srcXy.y;
+        }
+        
+        float4 p;
+        
+        p = sampleLinear(bg,co);
+        if(t >= xLow && t <= xHigh && r >= 0.0 && z >= yLow && z <= yHigh)
+        {
+            float4 cp = sampleLinear(cardImage,float2(srcXy));
+            p.rgb = p.rgb * (1.0 - cp.a) + cp.rgb * cp.a;
+            p.a = p.a + cp.a - p.a * cp.a;
+        }
+        
+        dst = p;
+    }
+}

@@ -1,0 +1,159 @@
+<languageVersion : 1.0;>
+
+kernel omino_spindala_32
+<   namespace : "omino";
+    category : "omino";
+    aeDisplayName : "omino spindala 32";
+    vendor : "omino";
+    version : 1;
+    description : "repeat image wedges";
+>
+{
+    input image4 src;
+    output pixel4 dst;
+    
+        parameter float wedges
+    <
+        minValue:1.0;
+        maxValue:100.0;
+        defaultValue:6.0;
+    >;
+
+    parameter bool reflections;
+
+    parameter float2 sourceCenter
+    <
+        aeUIControl:"aePoint";
+        aePointRelativeDefaultValue:float2(0.5,0.5);
+        defaultValue:float2(250,255);
+    >;
+    parameter float sourceAngle
+    <
+        aeUIControl:"aeAngle";
+        minValue:0.0;
+        maxValue:360.0;
+    >;
+
+    parameter float sourcePinch
+    <
+        minValue:-100.0;
+        maxValue:100.0;
+        defaultValue:0.0;
+    >;
+
+    parameter float sourceSpread
+    <
+        minValue:-10.0;
+        maxValue:10.0;
+        defaultValue:0.0;
+    >;
+
+    parameter float sourceSpiral
+    <
+        aeUIControl:"aeAngle";
+        minValue:-30.0;
+        maxValue:30.0;
+        defaultValue:0.0;
+    >;
+
+    parameter float2 drawCenter
+    <
+        aeUIControl:"aePoint";
+        aePointRelativeDefaultValue:float2(0.5,0.5);
+        defaultValue:float2(250,255);
+    >;
+    parameter float drawAngle
+    <
+        aeUIControl:"aeAngle";
+        minValue:0.0;
+        maxValue:360.0;
+    >;
+    parameter float drawSpiral
+    <
+        aeUIControl:"aeAngle";
+        minValue:-30.0;
+        maxValue:30.0;
+        defaultValue:0.0;
+    >;
+
+    parameter float opacity
+    <
+        minValue:0.0;
+        maxValue:1.0;
+        defaultValue:1.0;
+    >;
+    
+
+    // use a^x to squeeze the value lower.
+    // if x < 0, push the other direction.
+    float pinch(float a,float aMax,float amt)
+    {
+        bool inv = amt < 0.0;
+        if(inv)
+        {
+            a = aMax - a;
+            amt = -amt;
+        }
+        amt = sqrt(amt);
+        a = aMax * pow(a / aMax,amt + 1.0);
+        if(inv)
+            a = aMax - a;
+        return a;
+    }
+
+    void
+    evaluatePixel()
+    {
+        float pi = 3.14159265358979;
+        float2 co = outCoord();
+        pixel4 imgPixel = sampleLinear(src,co);
+        
+        // which pie-slice are we in? we consider the wedges to be centered on
+        // 0-degrees. The zeroth slice spans -theta/2 to theta/2.
+        float wedgesL = wedges;
+        if(reflections)
+            wedgesL = wedgesL / 2.0;
+
+        float theta = radians(360.0 / wedgesL);
+        co -= drawCenter;
+        float r = length(co);
+        
+        float omega = atan(co.y,co.x) + theta / 2.0;
+        omega += r * radians(drawSpiral / 200.0);
+        omega += radians(drawAngle);
+        omega = mod(omega + pi - theta / 2.0,pi + pi) - pi + theta / 2.0;
+        
+//        omega = omega - floor(omega / theta) * theta;
+        omega = mod(omega, theta);
+
+        
+        // omega is now positive, from 0 to theta
+        if(!reflections)
+        {
+            omega = pinch(omega,theta,sourcePinch);
+        }
+        
+        omega -= theta / 2.0;
+        if(reflections)
+        {
+            // omega now positive, from 0 to theta / 2
+            omega = abs(omega);
+            omega = pinch(omega,theta / 2.0,sourcePinch);//theta / 2.0 * (pow(omega / (theta / 2.0),sourceDistortion));
+        }
+
+        // sourcespread positive: range from 0 "normal" to max10 "totally circular"
+        if(sourceSpread >= 0.0)
+            omega *= (10.0 - sourceSpread) / 10.0;
+        else
+            omega *= -sourceSpread + 1.0;
+        omega -= r * radians(sourceSpiral / 200.0);
+        omega -= radians(sourceAngle);
+
+        
+        float2 srcCoord = sourceCenter + r * float2(cos(omega),sin(omega));
+        
+        pixel4 dstPixel = sampleLinear(src,srcCoord);
+        dst = opacity * dstPixel + (1.0 - opacity) * imgPixel;
+        //dst = mix(imgPixel,sampleLinear(src,srcCoord),opacity);
+    }
+}

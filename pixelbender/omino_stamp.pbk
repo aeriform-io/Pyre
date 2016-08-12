@@ -1,0 +1,180 @@
+/*
+ * Omino Stamp
+ *
+ * Pixel Bender plugin by David Van Brink, 2010
+ *
+ * Stamps a pattern with an image stamp
+ */
+<languageVersion : 1.0;>
+
+kernel omino_stamp_32
+<
+    namespace : "omino";
+    category: "omino";
+    vendor : "omino";
+    version : 1;
+    description : "stamp a pattern with an image";
+>
+{
+    input image4 src; // the underlying image
+    input image4 stamp; // an image to stamp with
+    output pixel4 dst;
+    
+    parameter float2 sourceSize
+    <
+        minValue:float2(1,1);
+        maxValue:float2(2048,2048);
+        defaultValue:float2(512,512);
+        aeUIControl: "aePoint";
+        aePointRelativeDefaultValue: float2(1,1);
+    >;
+    parameter float2 stampAnchor
+    <
+        minValue:float2(0,0);
+        maxValue:float2(2048,2048);
+        defaultValue:float2(128,128);
+    >;
+
+    parameter float2 patternCenter
+    <
+        minValue:float2(0,0);
+        maxValue:float2(2048,2048);
+        defaultValue:float2(128,128);
+        aeUIControl: "aePoint";
+    >;
+
+    parameter float2 patternSpacing
+    <
+        minValue:float2(1,1);
+        maxValue:float2(2048,2048);
+        defaultValue:float2(128,128);
+    >;
+    
+    parameter float stampScale
+    <
+        minValue:0.0;
+        maxValue:10.0;
+        defaultValue:0.3;
+    >;
+
+    parameter float patternBricking
+    <
+        minValue:-1.0;
+        maxValue:1.0;
+        defaultValue:0.0;
+    >;
+    parameter float patternRotation
+    <
+        minValue:-60.0;
+        maxValue:60.0;
+        defaultValue:0.0;
+        aeUIControl:"aeAngle";
+    >;
+    
+    parameter float stampRotation
+    <
+        minValue:-60.0;
+        maxValue:60.0;
+        defaultValue:0.0;
+        aeUIControl:"aeAngle";
+    >;
+    
+    parameter int stampOverlaps
+    <
+        minValue:0;
+        maxValue:5;
+        defaultValue:1;
+    >;
+    
+    parameter float affectsStampSizeAmount
+    <
+        minValue:0.0;
+        maxValue:100.0;
+        defaultValue:0.0;
+        aeUIControl:"aePercentSlider";
+    >;
+
+    parameter float affectsStampColorAmount
+    <
+        minValue:0.0;
+        maxValue:100.0;
+        defaultValue:0.0;
+        aeUIControl:"aePercentSlider";
+    >;
+
+    parameter float affectsStampRotationAmount
+    <
+        minValue:-300.0;
+        maxValue:300.0;
+        defaultValue:0.0;
+        aeUIControl:"aePercentSlider";
+    >;
+
+    void
+    evaluatePixel()
+    {
+        float2 sampleCo = outCoord();
+        float2 co = sampleCo;
+        pixel4 dstPixel = float4(0,0,0,0);
+        
+        float rotRad = radians(patternRotation);
+        float rotSin = sin(rotRad);
+        float rotCos = cos(rotRad);
+        float2x2 rotFwd = float2x2(rotCos,-rotSin,rotSin,rotCos);
+        float2x2 rotBwd = float2x2(rotCos,rotSin,-rotSin,rotCos);
+
+        // which rep-cell are we within, to start?
+        // the centerest cell is patternCenter - patternSpacing/2
+        co -= patternCenter;
+        co *= rotFwd;
+        // discover the y-row of the nearest-cell
+        float2 cellCo;
+        cellCo.y = floor(co.y / patternSpacing.y);
+        // incorporate the y-row for patternBricking, to discover the x-column of nearest-cell
+        cellCo.x = floor((co.x - cellCo.y * patternBricking * patternSpacing.x) / patternSpacing.x);
+        // assign co to the center of the nearest cell
+        co = (cellCo + float2(cellCo.y * patternBricking,0.0)) * patternSpacing;
+        co = co * rotBwd + patternCenter;
+        
+        // co is now the center of the nearest cell we're pattern.
+        float2 underCo = co;
+        
+        // finally, assign co to the relative positiong within that cell.
+        co = sampleCo - co;
+        
+        
+        float range = float(stampOverlaps);
+        float i,j;
+        for(i = -range; i <= range; i++)
+        {
+            for(j = -range; j <= range; j++)
+            {
+
+                float2 pluckOffset = float2((i + j * patternBricking) * patternSpacing.x,j * patternSpacing.y);
+                pixel4 underPixel = sampleLinear(src,clamp(underCo - pluckOffset * rotBwd,float2(1,1),sourceSize - float2(2,2)));
+
+                float2 pluckCo = co + pluckOffset * rotBwd;
+                
+                float scaleDown = stampScale * (100.0 - affectsStampSizeAmount * (1.0 - underPixel.g)) * 0.01;
+                if(scaleDown < 0.00001)
+                    scaleDown = 0.00001;
+
+                
+                // work in rotation of the stamp image
+                float stampRotRad = radians(stampRotation + 3.60 * underPixel.r * affectsStampRotationAmount);
+                float2x2 stampRotFwd = float2x2(cos(stampRotRad),-sin(stampRotRad),sin(stampRotRad),cos(stampRotRad));
+                
+                pluckCo = (pluckCo / scaleDown) * stampRotFwd + stampAnchor;
+                
+                pixel4 pluckPixel = sampleLinear(stamp,pluckCo);
+                pluckPixel.rgb = (affectsStampColorAmount * pluckPixel.rgb * underPixel.rgb + (100.0 - affectsStampColorAmount) * pluckPixel.rgb) * 0.01;
+                
+                dstPixel.rgb = pluckPixel.a * pluckPixel.rgb + dstPixel.rgb * (1.0 - pluckPixel.a);
+                dstPixel.a = dstPixel.a + pluckPixel.a - dstPixel.a * pluckPixel.a;
+            }
+        }
+        
+        dst = dstPixel;
+//        dst = underPixel;
+    }
+}

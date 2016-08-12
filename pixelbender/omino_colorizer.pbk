@@ -1,0 +1,87 @@
+<languageVersion : 1.0;>
+
+/*
+
+Description::This pixel bender kernel is a drop-in replacement for the old omino_colorizer
+plugin. It performs a most simple operaton, multiplying the source by a color. Amazingly handy.
+It also can be set to invert, multiply, and invert again, to give "subtractive" colorizing,
+kin to ink-printing (but with only CMY, not CMYK).
+
+dvb2010.
+
+ */
+
+kernel omino_colorizer_32
+<   
+    displayname: "omino colorizer 32";
+    namespace : "omino";
+    vendor : "omino";
+    category: "omino";
+    version : 2;
+    description : "simple light- or ink-tinting";
+>
+{
+    input image4 src;
+    output pixel4 dst;
+
+    parameter pixel4 color
+    <
+    defaultValue: pixel4(1.0, 0.0, 0.0, 1.0);
+    aeUIControl: "aeColor";
+    aeDisplayName: "color";
+    >;
+
+    parameter int mode
+    <
+        defaultValue: 0;
+        minValue:0;
+        maxValue:1;
+        aeUIControl: "aePopup";
+        aePopupString: "additive (light)|subtractive (ink)";
+        aeDisplayName: "mode";
+    >;    
+
+    parameter int draw
+    <
+        defaultValue: 0;
+        minValue:0;
+        maxValue:2;
+        aeUIControl: "aePopup";
+        aePopupString: "colors|one color|grays";
+        aeDisplayName: "draw";
+    >;    
+
+    void evaluatePixel()
+    {
+        float4 rgb = color;
+        pixel4 p = sampleNearest(src,outCoord());
+        float a = p.a; // preserve alpha
+        float4 w = float4(1,1,1,1); // white
+        
+        if(mode == 1) // subtractive "ink" colors
+        {
+            p = w - p;
+            rgb = w - rgb;
+        }
+        
+        p = p * rgb;
+
+        if(draw == 0) // colors
+        {
+            // do nothing! we're done.
+        }
+        else // one color, or gray tones
+        {
+            // find lightest component...
+            float m = max(max(p.r,p.g),p.b);
+            if(draw == 1) // one color
+                p = m * rgb;
+            else
+                p = float4(m,m,m,a);
+        }
+        if(mode == 1) // subtractive "ink" colors
+            p = w - p;
+            
+        dst = float4(p.r,p.g,p.b,a);
+    }
+}

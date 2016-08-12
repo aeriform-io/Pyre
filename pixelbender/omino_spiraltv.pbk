@@ -1,0 +1,124 @@
+<languageVersion : 1.0;>
+
+kernel omino_spiraltv_32
+<   namespace : "omino";
+    category : "omino";
+    aeDisplayName : "omino spiral tv 32";
+    vendor : "omino";
+    version : 1;
+    description : "simulated spiral-scan tv";
+>
+{
+    input image4 src;
+    output pixel4 dst;
+    
+    parameter float2 dstSize < aeUIControl: "aePoint";minValue: float2(1,1); maxValue: float2(1000,1000); defaultValue: float2(576,382); >;
+
+    parameter float scanWidth < minValue: 0.5 ; maxValue: 100.0; defaultValue: 40.0; >;
+    parameter bool scanDirection < defaultValue: true; >;
+    parameter float framePhase <minValue: -1.0 ; maxValue: 1.0 ; defaultValue: 0.0;>;
+    parameter float scanPhase <minValue: -1.0 ; maxValue: 1.0 ; defaultValue: 0.0;>;
+    parameter float scanlineCount < minValue: 0.0 ; maxValue: 66.0; defaultValue: 12.0; >;
+    parameter float scanRate < minValue: 0.99 ; maxValue: 1.01; defaultValue: 1.0; >;
+    parameter float cameraPhase < minValue: 60.0 ; maxValue: 120.0; defaultValue: 90.0; >;
+    parameter float frontPorch < minValue: -10.0 ; maxValue: 10.0; defaultValue: 0.0; >;
+    parameter float beamFocus < minValue: 0.0 ; maxValue: 10.0; defaultValue: 0.5; >;
+    parameter float2 center < aeUIControl: "aePoint";minValue: float2(0,0); maxValue: float2(1000,1000); defaultValue: float2(150,100); >;
+    parameter bool opaque < defaultValue: true; >;
+
+    /** l is the linear position along the scanline to sample. we then bump it further
+      by frame phase, which possibly has it in the blanking area */
+      
+    pixel4 sampleScan(float l)
+    {
+        float pi2 = 2.0 * 3.141592653;
+        // an entire frame is the scanlineCount + frontPorch
+        // offset by the framePhase
+        float totalScanlines = scanlineCount + frontPorch;
+        
+        float l3 = l + floor(framePhase * totalScanlines);
+        
+        l3 = mod(l3,totalScanlines);
+        float l2 = mod(l3,scanlineCount);
+        
+        
+        float d = fract(l2);
+        if(!scanDirection)
+            d = 1.0 - d;
+        float theta = 2.0 * 3.141592653 * d;
+        float radius = l2 * scanWidth;
+        
+        float2 co2;
+        theta -= scanPhase * pi2; // move the spiral a little
+        co2.x = sin(theta + cameraPhase / 57.29577951) * radius;
+        co2.y = sin(theta) * radius;
+        co2 += center;
+        co2 = max(co2,float2(1,1));
+        co2 = min(co2,dstSize - float2(1,1));
+        
+        pixel4 result = sampleLinear(src,co2);
+
+        if(l >= scanlineCount)
+        {
+            float fadeout = .2;
+            float f = max(0.0, scanlineCount + fadeout - l) / fadeout;
+            result.rgb *= f;
+        }
+        
+
+        // After all that, are we in the blanking area?
+        if(l3 > scanlineCount)
+            result.rgb = float3(0,0,0);
+
+        return result;
+    }
+
+    void
+    evaluatePixel()
+    {
+        float pi2 = 2.0 * 3.141592653;
+
+        float2 co = outCoord();
+        float2 co1 = co - center;
+        if(co1.x == co1.y)
+            co1.x += .2;
+        float theta = atan(co1.y,co1.x);
+        theta += scanPhase * pi2;
+        if(!scanDirection)
+            theta = -theta;
+        float radius = distance(co1,float2(0,0));
+        
+        // d ranges from 0 to 1 for each revolution
+        float d = theta / pi2;
+        d = mod(d,1.0);
+        if(d == 1.0)
+            d = 0.0;
+        
+        radius /= scanWidth ;//+ d * width; // scale to width-units
+        
+        float nearestScanlineRadius = floor(radius - d + .5) + d;
+        float ringNumber = floor(nearestScanlineRadius  );
+        
+        float distanceFromScanline = radius - nearestScanlineRadius; // from -.5 to +.5
+        
+        float scanlineAttenuation = 1.0 - 2.0 * abs(distanceFromScanline);
+        scanlineAttenuation = pow(scanlineAttenuation,beamFocus);
+
+        float l = ringNumber + d;
+        pixel4 f = sampleScan(l * scanRate);
+        
+
+        
+        dst = f;
+
+        dst.rgb *= scanlineAttenuation;
+        if(opaque)
+            dst.a = 1.0;
+
+
+        if(ringNumber < 0.0)
+            f = float4(1,0,0,1);
+
+        
+    }
+}

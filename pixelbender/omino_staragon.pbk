@@ -1,0 +1,282 @@
+<languageVersion : 1.0;>
+
+kernel omino_staragon_32
+<   displayName : "omino staragon 32";
+    category : "omino";
+    namespace : "omino";
+    vendor : "omino";
+    version : 1;
+    description : "draw or stroke regular polygons";
+>
+{
+    input image4 src;
+    output pixel4 dst;
+    
+    parameter float4 color1
+    <
+        aeUIControl:"aeColor";
+        minValue:float4(0,0,0,0);
+        maxValue:float4(1,1,1,1);
+        defaultValue:float4(1,0,.3,1);
+    >;
+
+    parameter float4 color2
+    <
+        aeUIControl:"aeColor";
+        minValue:float4(0,0,0,0);
+        maxValue:float4(1,1,1,1);
+        defaultValue:float4(0,1,.3,1);
+    >;
+    
+    parameter float2 center
+    <
+        aeUIControl:"aePoint";
+        aePointRelativeDefaultValue:float2(0.5,0.5);
+        defaultValue:float2(220,220);
+    >;
+
+    parameter int sides
+    <
+        minValue:3;
+        maxValue:24;
+        defaultValue:5;
+    >;
+
+    parameter float pointiness
+    <
+        minValue:0.;
+        maxValue:1.;
+        defaultValue:0.;
+    >;
+    
+    parameter int drawn
+    <
+        aeDisplayValue:"drawn area";
+        aeUIControl:"aePopup";
+        aePopupString:"color1|image|nothing";
+        minValue:0;
+        maxValue:2;
+        defaultValue:0;
+    >;
+
+    parameter int undrawn
+    <
+        aeDisplayValue:"undrawn area";
+        aeUIControl:"aePopup";
+        aePopupString:"color2|image|nothing";
+        minValue:0;
+        maxValue:2;
+        defaultValue:1;
+    >;
+        
+
+    parameter int strokeOrFill
+    <
+        aeDisplayValue:"style";
+        aeUIControl:"aePopup";
+        aePopupString:"fill|stroke";
+        minValue:0;
+        maxValue:1;
+        defaultValue:0;
+    >;
+
+    parameter float strokeWidth
+    <
+        aeDisplayValue:"stroke width";
+        minValue:0.5;
+        maxValue:45.0;
+        defaultValue:2.0;
+    >;
+
+    parameter float rotation
+    <
+        aeUIControl:"aeAngle";
+        parameterType:"angleDegrees";
+        minValue:-360.0;
+        maxValue:360.0;
+        defaultValue:0.0;
+    >;
+    
+    parameter float radius
+    <
+        minValue:0.0 ;
+        maxValue:1000.0 ;
+        defaultValue: 90.0 ;
+    >;
+
+    parameter float roundness
+    <
+        aeDisplayValue:"corner roundness";
+        minValue:0.0 ;
+        maxValue:1.0 ;
+        defaultValue: 0.05 ;
+    >;
+    parameter float edge
+    <
+        aeDisplayValue:"edge blur";
+        minValue:0.0 ;
+        maxValue:1000.0 ;
+        defaultValue: 2.0 ;
+    >;
+    
+    parameter float ringCount
+    <
+        aeDisplayValue:"ring count";
+        minValue:0.0;
+        maxValue:100.0;
+        defaultValue:0.0;
+    >;
+    parameter float ringSpacing
+    <
+        aeDisplayValue:"ring spacing";
+        minValue:0.0;
+        maxValue:100.0;
+        defaultValue:5.0;
+    >;
+
+    
+    /*
+     * Two points lineStart and lineEnd define an infinite line.
+     * Return the distance of point P from that line, where the
+     * distance is positive if it's on the right (as you walk drom
+     * lineStart to lineEnd) and negative on the left.
+     */
+    float distanceFromLine(float2 lineStart,float2 lineEnd,float2 p)
+    {
+       // and now, a bit of fun math, as we plot a line between two points.
+        float2 uv = p - lineStart;
+        float2 xy = lineEnd - lineStart;
+        float xy2 = dot(xy,xy);
+        float dl = -(dot(uv,float2(-xy.y,xy.x)) / xy2 * length(xy));
+        // dl is now the distance, in pixels, from outCoord to the line
+        return dl;
+    }
+
+    void
+    evaluatePixel()
+    {
+        // Start with the current point,
+        // with coordinates relative to the
+        // center of the polygon.
+        float2 coord = outCoord();
+        coord -= center;
+        
+        float4 imagePixel = sampleNearest(src,outCoord());
+        // The content to use for what's in the polygon, and what's outside.
+        float4 pIn = drawn == 1 ? imagePixel : color1;
+        float4 pOut = undrawn == 1 ? imagePixel : color2;
+        
+        if(drawn == 2) // drawn area is "nothing"? make it the undrawn area no alpha
+        {
+            pIn = pOut;
+            pIn.a = 0.0;
+        }
+        if(undrawn == 2) // undrawn area is "nothing"? make it the drawn area no alpha
+        {
+            pOut = pIn;
+            pOut.a = 0.0;
+        }
+        
+        // Introducing Theta and Omega.
+        //
+        // Theta is a circle divided by sides, 
+        // so, 90 degrees for a square, or
+        // 72 for a pentagon, &c.
+        //
+        // Omega is the angle from the polygon 
+        // center to the current point.
+        //
+        // (Later on, Omega2 is the angle within the
+        // rounded corners, a much tigher curve.)
+        
+        float pi = 3.14159265358979323;
+        //float sides = 7.0;
+        float theta = pi * 2.0 / float(sides);
+        
+        float omega = atan(coord.y,coord.x); // angle of current point from center
+        
+        // turn it, so we can rotate a polygon...
+        
+        // round omega to be the nearest polygon corner
+        // (first, turn the polygon, and add a half so the "neutral" position is edge down)
+        float turnsMod = radians(rotation) + theta / 2.0 + pi / 2.0;
+        omega = theta * floor((omega + theta / 2.0 - turnsMod) / theta) + turnsMod;
+        //omega = mod(omega + pi,2.0 * pi) - pi;
+
+        float omegaSin = sin(omega);
+        float omegaCos = cos(omega);
+        float2x2 rot = float2x2(omegaCos,-omegaSin,omegaSin,omegaCos);
+
+        // thetaNext is the angle to the next point, based on sides & pointiness
+        float thetaNext = theta * (1.0 + pointiness * (float(sides) / 2.0 - 1.0));
+
+        // For a particular corner radius, we reduce the 
+        // edge radius by a different amount, and add it
+        // back later for the un-rounded parts. This
+        // amount we pull in the corners, cornerPull, is 
+        // more than the corner radius.
+        float cornerPull = roundness * radius;
+        float cornerRadius = cornerPull * cos(thetaNext / 2.0);
+        cornerPull = min(cornerPull,radius);
+        rot *= (radius - cornerPull);
+
+        // p0 is the nearest corner, surrounded by p1 above, and p2 below.
+        // the current point will be evalated based on distance to
+        // those two edges (that is, p0 to p1, or p2 to p0), or distance
+        // from the inset corner, if it's close enough
+        
+        float2 p0 = float2(1,0) * rot; // nearest corner
+        float2 p1 = float2(cos(thetaNext),sin(thetaNext)) * rot; // upper edge
+        float2 p2 = float2(cos(thetaNext),-sin(thetaNext)) * rot; // lower edge
+        
+        // distances from each line segment; postive outside, negative inside the poly.
+        float distP1 = distanceFromLine(p0,p1,coord); // distance from nearest edge, up
+        float distP2 = distanceFromLine(p2,p0,coord); // distance from nearest edge, below
+        
+        float inOrOut = max(distP1,distP2);
+        
+        // But! Is the point near the corner?
+        // If so, round it by the corner radius.
+        //
+        // We want to say, is omega - theta/2 < omega2 < omega + theta/2,
+        // but because of pi and -pi wrapping, we figure the difference instead.
+
+        float omega2 = atan(coord.y - p0.y,coord.x - p0.x);
+        float cornerA = mod(omega2 - (omega - thetaNext / 2.0),pi * 2.0);
+        bool inCorner = cornerA < thetaNext && roundness > 0.0;
+        if(inCorner)
+        {
+            float distP0 = distance(p0,coord); // distance from the inset corner
+            inOrOut = distP0;
+        }
+
+        inOrOut -= min(radius,cornerRadius);
+        
+        float ringSpacing2 = ringSpacing + strokeWidth;
+        
+        if(inOrOut > ringSpacing / 2.0)
+        {
+            float ringNumber = inOrOut / ringSpacing2;
+            if(ringNumber < ringCount)
+            {
+                inOrOut = mod(inOrOut - ringSpacing / 2.0,ringSpacing2) + ringSpacing / 2.0;
+                if(inOrOut >= ringSpacing / 2.0)
+                    inOrOut -= ringSpacing2;
+            }
+        }
+        
+        // at this point, inOrOut is negative for areas
+        // inside the polygon, positive for outside.
+        // blend by Edge-pixels worth between them.
+        // & we're done.
+        
+        if(strokeOrFill > 0)// || (ringNumber >= 1.0))// && ringNumber <= float(ringCount)))
+        {
+            inOrOut = (abs(inOrOut + strokeWidth / 2.0) * 2.0 - strokeWidth);
+        }
+        
+        inOrOut = smoothStep(-edge, edge, inOrOut);
+        dst = mix(pIn,pOut,inOrOut);
+        
+    }
+}
